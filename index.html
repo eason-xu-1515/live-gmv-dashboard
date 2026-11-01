@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex,nofollow,nosnippet"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'self'; form-action 'none'"><title>全球成交监控大屏</title><link rel="stylesheet" href="assets/screen.css"><script src="assets/pages.js" defer></script><script src="assets/screen.js" defer></script>
+</head>
+<body>
+<section id="pages-gate" aria-label="解密经营快照">
+  <main class="login-panel">
+    <div class="brand"><span class="brand-icon">AE</span><span>GLOBAL COMMERCE<small>ENCRYPTED SNAPSHOT</small></span></div>
+    <h1>解密经营大屏</h1>
+    <p>这是加密快照网站，不是服务器端登录。<br>账号与口令仅用于浏览器本地解密，不发送给 GitHub。</p>
+    <form id="pages-form">
+      <label for="pages-username">账号</label><input id="pages-username" autocomplete="username" required maxlength="128">
+      <label for="pages-password">共享口令</label><input id="pages-password" type="password" autocomplete="current-password" required maxlength="256">
+      <button id="pages-submit" class="login-submit" type="submit">解密并查看 →</button>
+      <div id="pages-error" class="login-error" role="alert"></div>
+    </form>
+    <p class="login-note">解密密钥仅驻内存，8小时后清除；刷新页面需重新输入。<br>密文可公开下载，已下载的数据无法撤回。<br>本机每15分钟采集发布；电脑离线时保留最后快照。</p>
+  </main>
+</section>
+
+<div class="app" id="pages-dashboard" hidden>
+<header class="masthead">
+  <a class="brand" href="./" aria-label="全球成交首页"><span class="brand-icon">AE</span><span>GLOBAL COMMERCE<small>全球经营 · 成交监控</small></span></a>
+  <div class="headline"><h1>全球成交监控大屏</h1><span>GLOBAL COMMERCE COMMAND CENTER</span></div>
+  <div class="header-right"><div class="clock-box"><b id="clock">—</b><small>美西业务日 <span id="business-day">—</span></small></div><button id="fullscreen" class="icon-button" title="进入全屏" aria-label="进入全屏">⛶</button><button id="logout" class="plain-button">退出</button></div>
+</header>
+<section class="filter-bar" aria-label="国家筛选">
+  <div class="filter-title"><i></i>国家 / 区域</div><div id="country-tabs" class="country-tabs" role="group" aria-label="选择国家"></div>
+  <div class="filter-status"><span id="connection" class="connection"><i></i><span>正在连接</span></span><span>目标版本 <b>经管版</b></span></div>
+</section>
+<div id="alert" class="alert" role="status">正在读取真实成交；未取得的指标保留空值。</div>
+<section id="totals" class="totals" aria-label="关键经营指标"></section>
+<main class="visual-grid">
+  <section class="panel map-panel" aria-labelledby="map-title">
+    <div class="panel-heading"><div><i class="radar"></i><h2 id="map-title">全球成交分布</h2><span>WORLD OVERVIEW</span></div><div id="metric-tabs" class="metric-tabs" role="group" aria-label="地图指标"></div></div>
+    <div class="map-stage"><svg id="world-map" viewBox="0 0 960 510" role="group" aria-label="全球地图，点击八个业务地区筛选"></svg><div id="map-message" class="map-message">正在加载世界地图</div></div>
+    <div class="map-key"><span><i></i>气泡大小与颜色表示成交规模</span><span>点击国家 / 标记联动指标</span></div>
+    <div id="market-list" class="market-list" role="group" aria-label="地图地区数据与键盘筛选"></div>
+    <div class="map-credit">Natural Earth · 1:110m · Public Domain ｜ GCC：SA / AE / QA / KW / BH / OM</div>
+  </section>
+  <section class="panel trend-panel" aria-labelledby="trend-title">
+    <div class="panel-heading"><div><i class="radar"></i><h2 id="trend-title">小时成交趋势</h2><span>HOURLY TREND</span></div></div>
+    <div class="trend-toolbar"><span id="trend-country">全部八国</span><div class="metric-tabs" role="group" aria-label="小时统计方式"><button data-trend="hourly" aria-pressed="true">单小时</button><button data-trend="cumulative" aria-pressed="false">当日累计</button></div></div>
+    <div class="chart-legend"><span class="legend-total">大盘 GMV</span><span class="legend-nn">NN GMV</span><span class="legend-sd">SD GMV</span><small>USD · 美西时间</small></div>
+    <div class="chart-stage"><svg id="hour-chart" viewBox="0 0 640 380" role="img" aria-label="各小时成交趋势"></svg><div id="trend-empty" class="trend-empty">小时数据待更新</div></div>
+    <div id="chart-detail" class="chart-detail" aria-live="polite">悬浮小时数据点查看成交金额</div>
+    <div class="trend-note">小时成交来自支付时间聚合，不是两次刷新差额；当前小时尚未结束，未来小时不填 0。</div>
+    <details class="hour-table"><summary>查看小时数据表</summary><div class="table-scroll"><table><thead><tr><th>美西小时</th><th>大盘 GMV</th><th>NN GMV</th><th>SD GMV</th></tr></thead><tbody id="hour-details"></tbody></table></div></details>
+  </section>
+</main>
+<footer>
+  <div class="source-status"><span><i class="tiny-dot"></i>底表每 <b>15 分钟</b>更新</span><span>本机采集 <b>15 分钟 / 次</b></span><span>预计下次采集 <b id="collector-countdown">—</b></span><span>页面刷新 <b id="countdown">—</b> / 60 秒</span><span>最近查询成功 <b id="last-success">—</b></span><span>耗时 <b id="query-time">—</b></span><span>最新支付 <b id="latest-paid">—</b></span><span>SD 标签 <b id="tag-time">—</b></span></div>
+  <p>GMV 为美西业务日当天累计、美元应付口径。达成率 = 当天累计 GMV ÷ 当天全天目标（经管版）；DAC 为当天支付买家独立去重，不累计小时人数。八国合计不包含其他地区；最新支付时间不等于源表完整水位。</p>
+</footer>
+</div>
+</body></html>

@@ -9,6 +9,14 @@ const kpis = [
   {key:'sd_rate',label:'SD达成率',format:'percent',tag:'TARGET'},
   {key:'dac',label:'DAC',format:'integer',tag:'CUSTOMERS'}
 ];
+const investmentKeys = [
+  {key:'total',label:'总经营TR',note:'跨源近实时 · 非严格同小时、非财务全量'},
+  {key:'nn',label:'NN费率',note:'金本位花费 ÷ 同源 tax_gmv · 小时截止未知'},
+  {key:'sd_brand',label:'SD品牌TR',note:'品牌常规花费 ÷ 同小时SD业务GMV'},
+  {key:'sd_nonbrand',label:'SD非品牌TR',note:'非品牌常规花费 ÷ 同小时SD业务GMV'},
+  {key:'incremental',label:'整体增投TR',note:'全部增投资金花费 ÷ 同小时大盘业务GMV'}
+];
+const investmentReasons = {source_failed:'投资源待更新',source_timeout:'投资源查询超时',source_invalid:'投资源校验未通过',target_missing:'目标缺项，GAP留空',target_scope:'目标资金范围待核验',denominator_missing:'对应GMV缺失或为零',hour_missing:'业务GMV小时缺失',no_safe_hour:'暂无安全截止小时',unknown_fund:'含未识别资金实际',unbudgeted:'含预算外实际',nn_hour_unknown:'NN小时截止未知',cross_source:'跨源近实时',expired:'原快照已过期，等待更新',target_invalid:'目标版本待核验',day_changed:'业务日已切换',dst_watermark:'重复小时水位待核验'};
 const countries = [['US','美国'],['BR','巴西'],['MX','墨西哥'],['CL','智利'],['KR','韩国'],['JP','日本'],['IL','以色列'],['GCC','GCC'],['ONE','一人一国']];
 const oneCountryIso = 'COL CHE NOR PER THA SGP PAK ARG MYS SRB REU HKG LKA AGO ISL ALB MTQ VNM CRI BGD SLV PHL GLP MUS PRI GUF TZA MOZ SYC KHM MKD PYF ZMB BOL CPV BIH PRY UGA MDV MNE NIC BRN NCL CIV DOM GTM TWN SEN MDG BWA BFA ZWE URY TUN JOR MWI RWA MMR GIN HND PNG ABW GNQ FRO NPL NAM'.split(' ');
 const iso = {USA:'US',BRA:'BR',MEX:'MX',CHL:'CL',KOR:'KR',JPN:'JP',ISR:'IL',SAU:'GCC',ARE:'GCC',QAT:'GCC',KWT:'GCC',BHR:'GCC',OMN:'GCC',...Object.fromEntries(oneCountryIso.map(code=>[code,'ONE']))};
@@ -23,6 +31,7 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const $ = id => document.getElementById(id);
 let selectedCountry = 'ALL', selected = 'total', trendMode = 'hourly', payload = null;
 let nextPoll = Date.now()+60000, offset = 0, fetchRunning = false, networkError = false, mapLoaded = false;
+let responseGeneration = 0, suspended = false;
 
 function text(id,value){$(id).textContent=value;}
 function numeric(value){return typeof value === 'number' && Number.isFinite(value);}
@@ -34,6 +43,55 @@ function regionData(code){return payload?.snapshot?.countries?.find(c=>c.code===
 function currentMetrics(){return selectedCountry === 'ALL' ? payload?.snapshot?.totals : regionData(selectedCountry)?.metrics;}
 function currentTargets(){return selectedCountry === 'ALL' ? payload?.targets?.totals : payload?.targets?.countries?.[selectedCountry];}
 function rate(actual,target){return numeric(actual) && numeric(target) && target>0 ? actual/target*100 : null;}
+function rateText(value,signed=false){
+  if(!numeric(value)) return '—';
+  const prefix=signed && value>0 ? '+' : signed && value<0 ? '−' : '';
+  const amount=Math.abs(value);
+  return prefix+(amount>0 && amount<0.01 ? '<0.01' : money.format(amount));
+}
+function investmentData(){
+  const block=payload?.investment;
+  if(block?.version!==1 || block.business_day!==payload?.snapshot?.business_day) return null;
+  return selectedCountry==='ALL' ? block.totals : block.countries?.[selectedCountry];
+}
+function investmentExpired(value){
+  const now=Date.now()+offset;
+  return !value?.source_success_at || !Number.isFinite(Date.parse(value.source_success_at)) ||
+    now-Date.parse(value.source_success_at)>1800000 || Date.parse(value.source_success_at)-now>300000 ||
+    payload?.investment?.business_day!==dateFormat.format(new Date(now)).replaceAll('-','');
+}
+function renderInvestment(){
+  text('investment-region',regionName());
+  const items=investmentData();
+  investmentKeys.forEach(({key,note})=>{
+    const card=$(`investment-${key}`),v=items?.[key],expired=v?.source_success_at && investmentExpired(v);
+    const usable=v?.source_success_at && !expired && ['ok','stale'].includes(v.status) && numeric(v.rate_pct);
+    card.dataset.status=usable ? v.status : 'waiting';
+    card.querySelector('.investment-actual').textContent=usable ? `${rateText(v.rate_pct)}%` : '—';
+    card.querySelector('.investment-target').textContent=`目标 ${numeric(v?.target_rate_pct) ? rateText(v.target_rate_pct)+'%' : '—'}`;
+    const gap=usable && numeric(v.gap_pp) ? v.gap_pp : null;
+    card.querySelector('.investment-gap').textContent=numeric(gap) ? `${rateText(gap,true)} pp · ${gap>0 ? '高于目标' : gap<0 ? '低于目标' : '与目标一致'}` : 'GAP —';
+    card.querySelector('.investment-basis').textContent=usable ? `花费 $${formatted(v.spend)} / 对应GMV $${formatted(v.gmv)}` : '花费 / 对应GMV 待更新';
+    card.querySelector('.investment-time').textContent=v?.source_success_at ? `${v.status==='stale' ? '原来源成功' : '来源成功'} ${paidTime(v.source_success_at)}（美西） · ${Number.isInteger(v.cutoff_hour) ? '同小时截取至 '+String(v.cutoff_hour).padStart(2,'0')+':00' : '小时截止未知'}` : '来源时间待更新';
+    const reasons=(v?.reason_codes || []).map(reason=>investmentReasons[reason]).filter(Boolean);
+    if(expired) reasons.push('原快照已过期，等待更新');
+    if(v?.status==='stale' && !expired) reasons.unshift('待更新：完整保留原费率、分母与目标');
+    if(!items) reasons.push('投资数据待接入');
+    if(selectedCountry==='ALL' && !numeric(v?.target_rate_pct) && payload?.investment){
+      const missing=countries.filter(([c])=>!numeric(payload.investment.countries?.[c]?.[key]?.target_rate_pct)).map(([,name])=>name);
+      if(missing.length) reasons.push('合计目标缺项：'+missing.join('、'));
+    }
+    card.querySelector('.investment-status').textContent=[...new Set(reasons)].join(' · ') || '同日快照';
+    card.querySelector('.investment-definition').textContent=note;
+  });
+  const sources=payload?.investment?.sources;
+  text('investment-sources',sources ? ['nn','marketing'].map(key=>{
+    const s=sources[key];return `${key==='nn' ? 'NN' : '营销'}查询 ${paidTime(s?.query_started_at)}–${paidTime(s?.query_finished_at)}（美西，查询时间不是数据水位） · ${s?.status==='ok' ? '本轮来源成功' : '本轮来源待更新'}`;
+  }).join('；') : '投资数据待接入；缺目标与未取得的数据均留空。');
+}
+function clearSensitive(){
+  responseGeneration++;payload=null;offset=0;networkError=false;render(false);
+}
 function half(char,position,extra=''){
   const node=document.createElement('span');node.className=`half ${position} ${extra}`;
   const glyph=document.createElement('span');glyph.className='glyph';glyph.textContent=char;node.append(glyph);return node;
@@ -78,6 +136,11 @@ function initialize(){
     card.innerHTML=`<div class="total-head"><span>${kpi.label}</span><small>${kpi.tag}</small></div><div class="kpi-value"><span class="currency${kpi.format==='money' ? '' : ' suffix'}">${kpi.format==='money' ? '$' : kpi.format==='percent' ? '%' : '人'}</span><div class="number" id="total-${kpi.key}" data-format="${kpi.format}" role="img"></div></div><div class="total-foot"></div><div class="rate-bar"><span></span></div>`;
     $('totals').append(card);
   });
+  investmentKeys.forEach(({key,label})=>{
+    const card=document.createElement('article');card.className='investment-card';card.id=`investment-${key}`;
+    card.innerHTML=`<h3>${label}</h3><div class="investment-actual">—</div><div class="investment-target">目标 —</div><div class="investment-gap">GAP —</div><p class="investment-basis"></p><p class="investment-time"></p><p class="investment-status"></p><p class="investment-definition"></p>`;
+    $('investment-cards').append(card);
+  });
   [['ALL','美亚合计'],...countries].forEach(([code,name])=>{
     const button=document.createElement('button');button.textContent=name;button.dataset.country=code;
     button.addEventListener('click',()=>selectCountry(code));$('country-tabs').append(button);
@@ -116,7 +179,7 @@ function render(animate=true){
   });
   text('trend-country',regionName());text('last-success',paidTime(snap?.success_at));text('latest-paid',paidTime(snap?.latest_paid));
   text('query-time',snap ? `${snap.query_seconds.toFixed(1)}s` : '—');text('tag-time',snap ? `${snap.tag_snapshot.ds} / ${snap.tag_snapshot.hh}:00` : '—');
-  paintMap();renderTrend();fitNumbers();updateStatus();
+  paintMap();renderTrend();renderInvestment();fitNumbers();updateStatus();
 }
 function svgNode(tag,attrs={},content){
   const node=document.createElementNS('http://www.w3.org/2000/svg',tag);Object.entries(attrs).forEach(([k,v])=>node.setAttribute(k,String(v)));
@@ -254,7 +317,8 @@ function updateStatus(){
   text('business-day',snap ? `${snap.business_day.slice(0,4)}.${snap.business_day.slice(4,6)}.${snap.business_day.slice(6)}` : dateFormat.format(new Date(now)));
 }
 async function refresh(){
-  if(fetchRunning) return;fetchRunning=true;nextPoll=Date.now()+60000;
+  if(fetchRunning || suspended) return;fetchRunning=true;nextPoll=Date.now()+60000;
+  const version=responseGeneration;
   try{
     let fresh;
     if(window.liveDataSource){
@@ -262,20 +326,23 @@ async function refresh(){
       fresh=await window.liveDataSource.read();if(!fresh) return;
     }else{
       const response=await fetch('/api/snapshot',{cache:'no-store',signal:AbortSignal.timeout(15000)});
-      if(response.status===401){location.replace('/login');return;}if(!response.ok) throw new Error('连接失败');
+      if(response.status===401){clearSensitive();location.replace('/login');return;}if(!response.ok) throw new Error('连接失败');
       fresh=await response.json();
     }
+    if(version!==responseGeneration || suspended || window.liveDataSource?.locked()) return;
     if(!fresh || !fresh.server_time || !('snapshot' in fresh)) throw new Error('响应异常');
     // 静态快照时间不是实时服务器时钟，不能反复把浏览器时钟拨回采集时刻。
     offset=window.liveDataSource ? 0 : Date.parse(fresh.server_time)-Date.now();payload=fresh;networkError=false;render();
-  }catch(error){networkError=true;updateStatus();}
+  }catch(error){if(version===responseGeneration && !suspended){networkError=true;updateStatus();}}
   finally{fetchRunning=false;if(Date.now()>=nextPoll) nextPoll=Date.now()+60000;}
 }
 $('fullscreen').addEventListener('click',async()=>{try{if(document.fullscreenElement) await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch(error){$('fullscreen').title='浏览器当前不允许全屏';}});
 document.addEventListener('fullscreenchange',()=>{const label=document.fullscreenElement ? '退出全屏' : '进入全屏';$('fullscreen').title=label;$('fullscreen').setAttribute('aria-label',label);});
-$('logout').addEventListener('click',async()=>{if(window.liveDataSource){window.liveDataSource.lock();return;}try{const response=await fetch('/api/logout',{method:'POST'});if(response.ok) location.replace('/login');}catch(error){networkError=true;updateStatus();}});
-window.addEventListener('live-unlocked',refresh);
-window.addEventListener('live-locked',()=>{payload=null;offset=0;networkError=false;render(false);});
+$('logout').addEventListener('click',async()=>{suspended=true;clearSensitive();if(window.liveDataSource){window.liveDataSource.lock();return;}try{const response=await fetch('/api/logout',{method:'POST'});if(response.ok) location.replace('/login');}catch(error){networkError=true;updateStatus();}});
+window.addEventListener('live-unlocked',()=>{suspended=false;refresh();});
+window.addEventListener('live-locked',()=>{suspended=true;clearSensitive();});
+window.addEventListener('pagehide',()=>{suspended=true;clearSensitive();});
+window.addEventListener('pageshow',()=>{if(!window.liveDataSource?.locked()){suspended=false;refresh();}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden && Date.now()>=nextPoll) refresh();});
 window.addEventListener('resize',()=>requestAnimationFrame(fitNumbers));
 initialize();refresh();
@@ -283,5 +350,5 @@ setInterval(()=>{
   text('clock',timeFormat.format(new Date(Date.now()+offset)));text('countdown',`${Math.max(0,Math.ceil((nextPoll-Date.now())/1000))}s`);
   const left=payload?.next_refresh_at ? Math.max(0,Math.ceil((Date.parse(payload.next_refresh_at)-Date.now()-offset)/1000)) : null;
   text('collector-countdown',payload?.query_running ? '进行中' : left===null ? '—' : left===0 ? (window.liveDataSource ? '等待新快照' : '即将取数') : `${Math.floor(left/60)}分${String(left%60).padStart(2,'0')}秒`);
-  updateStatus();if(Date.now()>=nextPoll && !fetchRunning) refresh();
+  updateStatus();renderInvestment();if(Date.now()>=nextPoll && !fetchRunning) refresh();
 },1000);

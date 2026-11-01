@@ -49,9 +49,14 @@ function rateText(value,signed=false){
   const amount=Math.abs(value);
   return prefix+(amount>0 && amount<0.01 ? '<0.01' : money.format(amount));
 }
+function investmentCountries(){return payload?.investment?.version===1 ? countries : countries.filter(([code])=>code!=='ONE');}
+function investmentRegionName(){
+  if(selectedCountry!=='ALL') return regionName();
+  return payload?.investment?.version===1 ? '旧版投资合计（八国＋一人一国）' : '投资合计（核心8国，不含一人一国）';
+}
 function investmentData(){
   const block=payload?.investment;
-  if(block?.version!==1 || block.business_day!==payload?.snapshot?.business_day) return null;
+  if(![1,2].includes(block?.version) || block.business_day!==payload?.snapshot?.business_day) return null;
   return selectedCountry==='ALL' ? block.totals : block.countries?.[selectedCountry];
 }
 function investmentExpired(value){
@@ -61,7 +66,7 @@ function investmentExpired(value){
     payload?.investment?.business_day!==dateFormat.format(new Date(now)).replaceAll('-','');
 }
 function renderInvestment(){
-  text('investment-region',regionName());
+  text('investment-region',investmentRegionName());
   const items=investmentData();
   investmentKeys.forEach(({key,note})=>{
     const card=$(`investment-${key}`),v=items?.[key],expired=v?.source_success_at && investmentExpired(v);
@@ -78,7 +83,7 @@ function renderInvestment(){
     if(v?.status==='stale' && !expired) reasons.unshift('待更新：完整保留原费率、分母与目标');
     if(!items) reasons.push('投资数据待接入');
     if(selectedCountry==='ALL' && !numeric(v?.target_rate_pct) && payload?.investment){
-      const missing=countries.filter(([c])=>!numeric(payload.investment.countries?.[c]?.[key]?.target_rate_pct)).map(([,name])=>name);
+      const missing=investmentCountries().filter(([c])=>!numeric(payload.investment.countries?.[c]?.[key]?.target_rate_pct)).map(([,name])=>name);
       if(missing.length) reasons.push('合计目标缺项：'+missing.join('、'));
     }
     card.querySelector('.investment-status').textContent=[...new Set(reasons)].join(' · ') || '同日快照';

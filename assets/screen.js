@@ -9,8 +9,9 @@ const kpis = [
   {key:'sd_rate',label:'SD达成率',format:'percent',tag:'TARGET'},
   {key:'dac',label:'DAC',format:'integer',tag:'CUSTOMERS'}
 ];
-const countries = [['US','美国'],['BR','巴西'],['MX','墨西哥'],['CL','智利'],['KR','韩国'],['JP','日本'],['IL','以色列'],['GCC','GCC']];
-const iso = {USA:'US',BRA:'BR',MEX:'MX',CHL:'CL',KOR:'KR',JPN:'JP',ISR:'IL',SAU:'GCC',ARE:'GCC',QAT:'GCC',KWT:'GCC',BHR:'GCC',OMN:'GCC'};
+const countries = [['US','美国'],['BR','巴西'],['MX','墨西哥'],['CL','智利'],['KR','韩国'],['JP','日本'],['IL','以色列'],['GCC','GCC'],['ONE','一人一国']];
+const oneCountryIso = 'COL CHE NOR PER THA SGP PAK ARG MYS SRB REU HKG LKA AGO ISL ALB MTQ VNM CRI BGD SLV PHL GLP MUS PRI GUF TZA MOZ SYC KHM MKD PYF ZMB BOL CPV BIH PRY UGA MDV MNE NIC BRN NCL CIV DOM GTM TWN SEN MDG BWA BFA ZWE URY TUN JOR MWI RWA MMR GIN HND PNG ABW GNQ FRO NPL NAM'.split(' ');
+const iso = {USA:'US',BRA:'BR',MEX:'MX',CHL:'CL',KOR:'KR',JPN:'JP',ISR:'IL',SAU:'GCC',ARE:'GCC',QAT:'GCC',KWT:'GCC',BHR:'GCC',OMN:'GCC',...Object.fromEntries(oneCountryIso.map(code=>[code,'ONE']))};
 const centers = {US:[-100,39,-18,-37],BR:[-52,-12,-10,45],MX:[-102,23,-66,26],CL:[-71,-34,-38,39],KR:[128,36,-17,-42],JP:[138,37,40,18],IL:[35,31,-83,-25],GCC:[51,24,27,42]};
 const colors = {total:'#32a8ff',nn:'#11e3de',sd:'#b690ff'};
 const money = new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -28,7 +29,7 @@ function numeric(value){return typeof value === 'number' && Number.isFinite(valu
 function formatted(value,format='money'){return numeric(value) ? (format === 'integer' ? integer : money).format(value) : '—';}
 function paidTime(value){return value ? timeFormat.format(new Date(value)) : '—';}
 function compact(value){if(!numeric(value)) return '—'; return value>=1e6 ? `${(value/1e6).toFixed(2)}M` : value>=1e3 ? `${(value/1e3).toFixed(1)}K` : value.toFixed(0);}
-function regionName(){return selectedCountry === 'ALL' ? '全部八国' : countries.find(c=>c[0]===selectedCountry)[1];}
+function regionName(){return selectedCountry === 'ALL' ? '美亚合计（八国＋一人一国）' : selectedCountry === 'ONE' ? '一人一国（66国）' : countries.find(c=>c[0]===selectedCountry)[1];}
 function regionData(code){return payload?.snapshot?.countries?.find(c=>c.code===code);}
 function currentMetrics(){return selectedCountry === 'ALL' ? payload?.snapshot?.totals : regionData(selectedCountry)?.metrics;}
 function currentTargets(){return selectedCountry === 'ALL' ? payload?.targets?.totals : payload?.targets?.countries?.[selectedCountry];}
@@ -77,13 +78,13 @@ function initialize(){
     card.innerHTML=`<div class="total-head"><span>${kpi.label}</span><small>${kpi.tag}</small></div><div class="kpi-value"><span class="currency${kpi.format==='money' ? '' : ' suffix'}">${kpi.format==='money' ? '$' : kpi.format==='percent' ? '%' : '人'}</span><div class="number" id="total-${kpi.key}" data-format="${kpi.format}" role="img"></div></div><div class="total-foot"></div><div class="rate-bar"><span></span></div>`;
     $('totals').append(card);
   });
-  [['ALL','全部八国'],...countries].forEach(([code,name])=>{
+  [['ALL','美亚合计'],...countries].forEach(([code,name])=>{
     const button=document.createElement('button');button.textContent=name;button.dataset.country=code;
     button.addEventListener('click',()=>selectCountry(code));$('country-tabs').append(button);
   });
   countries.forEach(([code,name])=>{
     const button=document.createElement('button');button.dataset.market=code;
-    const label=document.createElement('span');label.textContent=`${name} ${code==='GCC' ? '' : code}`;
+    const label=document.createElement('span');label.textContent=code==='ONE' ? `${name}（66国）` : `${name} ${code==='GCC' ? '' : code}`;
     const value=document.createElement('b');value.textContent='—';button.append(label,value);
     button.addEventListener('click',()=>selectCountry(code));$('market-list').append(button);
   });
@@ -144,9 +145,9 @@ async function loadMap(){
     source.features.forEach(feature=>{
       if(feature.properties.code==='ATA') return;
       const code=iso[feature.properties.code],path=svgNode('path',{d:geometryPath(feature.geometry),class:`land${code ? ' business' : ''}`,'fill-rule':'evenodd'});
-      if(code){bindRegion(path,code);path.append(svgNode('title'));}map.append(path);
+      if(code){bindRegion(path,code);if(code==='ONE') path.dataset.member=feature.properties.name || feature.properties.code;path.append(svgNode('title'));}map.append(path);
     });
-    countries.forEach(([code,name])=>{
+    countries.filter(([code])=>centers[code]).forEach(([code,name])=>{
       const [lon,lat,dx,dy]=centers[code],[x,y]=project(lon,lat),group=svgNode('g',{class:'map-marker',transform:`translate(${x},${y})`});
       bindRegion(group,code);group.append(svgNode('title'),svgNode('circle',{r:22,class:'halo'}),svgNode('circle',{r:14,class:'core'}),
         svgNode('path',{d:`M0,0 L${dx},${dy}`,class:'map-link'}),svgNode('text',{x:dx,y:dy-4,class:'map-label'},name),
@@ -157,16 +158,17 @@ async function loadMap(){
 }
 function paintMap(){
   if(!mapLoaded) return;
-  const max=Math.max(1,...countries.map(([c])=>regionData(c)?.metrics?.[selected] || 0));
+  const max=Math.max(1,...countries.filter(([c])=>centers[c]).map(([c])=>regionData(c)?.metrics?.[selected] || 0));
   document.querySelectorAll('#world-map [data-region]').forEach(node=>{
     const code=node.dataset.region,current=regionData(code),value=current?.metrics?.[selected],has=numeric(value),ratio=has ? Math.sqrt(value/max) : 0;
     const selectedRegion=selectedCountry===code,label=countries.find(c=>c[0]===code)[1];
     const target=payload?.targets?.countries?.[code]?.[selected],achievement=rate(value,target);
-    const title=`${label} · ${metrics.find(m=>m.key===selected).label}：$${formatted(value)} · 达成率 ${formatted(achievement)}${numeric(achievement) ? '%' : '（目标或实际待更新）'}`;
+    const scopeLabel=code==='ONE' ? `${label}（66国合计，非本国数值；地图仅标示范围） · 成员 ${node.dataset.member}` : label;
+    const title=`${scopeLabel} · ${metrics.find(m=>m.key===selected).label}：$${formatted(value)} · 达成率 ${formatted(achievement)}${numeric(achievement) ? '%' : '（目标或实际待更新）'}`;
     node.setAttribute('aria-label',title);node.setAttribute('aria-pressed',String(selectedRegion));node.querySelector('title').textContent=title;
     node.classList.toggle('selected',selectedRegion);node.classList.toggle('focused',selectedRegion);
     const fill=has ? `hsl(${205-ratio*15} 77% ${18+ratio*25}%)` : '#173752';
-    if(node.tagName.toLowerCase()==='path') node.style.fill=fill;
+    if(node.tagName.toLowerCase()==='path') node.style.fill=code==='ONE' ? (selectedRegion ? '#197c89' : '#164756') : fill;
     else{
       node.querySelector('.core').setAttribute('r',has ? 7+ratio*17 : 5);node.querySelector('.core').style.fill=fill;
       node.querySelector('.halo').setAttribute('r',has ? 13+ratio*17 : 10);node.querySelector('.amount').textContent=has ? `$${compact(value)}` : '待更新';
@@ -238,7 +240,7 @@ function updateStatus(){
   if(networkError) warnings.push('页面连接中断，保留最后成功快照');
   if(!snap) warnings.push(payload?.error || '正在查询真实成交，首次取数可能需要较长时间');
   if(snap?.business_day!==currentDay && snap) warnings.push(`当前 ${currentDay}；显示 ${snap.business_day} 历史快照和同日目标，等待新业务日数据`);
-  if(snap && !snap.complete) warnings.push('部分国家未取得数据，八国合计留空');
+  if(snap && !snap.complete) warnings.push('部分地区未取得数据，美亚合计留空');
   if(payload?.error) warnings.push(payload.error);else if(outdated && snap?.business_day===currentDay) warnings.push('超过30分钟未取得成功快照，等待更新');
   if(snap && snap.schema_version!==2) warnings.push('旧快照仅有GMV，DAC及小时数据等待新版取数');
   if(snap?.missing_buyers>0) warnings.push(`有 ${integer.format(snap.missing_buyers)} 条记录缺少买家标识，相关DAC留空`);

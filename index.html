@@ -35,14 +35,14 @@
 <main class="visual-grid">
   <section class="panel map-panel" aria-labelledby="map-title">
     <div class="panel-heading"><div><i class="radar"></i><h2 id="map-title">全球成交分布</h2><span>WORLD OVERVIEW</span></div><div id="metric-tabs" class="metric-tabs" role="group" aria-label="地图指标"></div></div>
-    <div class="map-stage"><svg id="world-map" viewBox="0 0 960 510" role="group" aria-label="全球地图，点击八个业务地区筛选"></svg><div id="map-message" class="map-message">正在加载世界地图</div></div>
-    <div class="map-key"><span><i></i>气泡大小与颜色表示成交规模</span><span>点击国家 / 标记联动指标</span></div>
+    <div class="map-stage"><svg id="world-map" viewBox="0 0 960 510" role="group" aria-label="全球地图，点击八国或一人一国范围联动筛选"></svg><div id="map-message" class="map-message">正在加载世界地图</div></div>
+    <div class="map-key"><span><i></i>八国气泡表示成交规模</span><span>一人一国底色仅标示66国范围</span></div>
     <div id="market-list" class="market-list" role="group" aria-label="地图地区数据与键盘筛选"></div>
-    <div class="map-credit">Natural Earth · 1:110m · Public Domain ｜ GCC：SA / AE / QA / KW / BH / OM</div>
+    <div class="map-credit">Natural Earth · 1:110m · Public Domain ｜ GCC：SA / AE / QA / KW / BH / OM ｜ 一人一国按66国清单合计；部分小型地区未绘制</div>
   </section>
   <section class="panel trend-panel" aria-labelledby="trend-title">
     <div class="panel-heading"><div><i class="radar"></i><h2 id="trend-title">小时成交趋势</h2><span>HOURLY TREND</span></div></div>
-    <div class="trend-toolbar"><span id="trend-country">全部八国</span><div class="metric-tabs" role="group" aria-label="小时统计方式"><button data-trend="hourly" aria-pressed="true">单小时</button><button data-trend="cumulative" aria-pressed="false">当日累计</button></div></div>
+    <div class="trend-toolbar"><span id="trend-country">美亚合计（八国＋一人一国）</span><div class="metric-tabs" role="group" aria-label="小时统计方式"><button data-trend="hourly" aria-pressed="true">单小时</button><button data-trend="cumulative" aria-pressed="false">当日累计</button></div></div>
     <div class="chart-legend"><span class="legend-total">大盘 GMV</span><span class="legend-nn">NN GMV</span><span class="legend-sd">SD GMV</span><small>USD · 美西时间</small></div>
     <div class="chart-stage"><svg id="hour-chart" viewBox="0 0 640 380" role="img" aria-label="各小时成交趋势"></svg><div id="trend-empty" class="trend-empty">小时数据待更新</div></div>
     <div id="chart-detail" class="chart-detail" aria-live="polite">悬浮小时数据点查看成交金额</div>
@@ -52,7 +52,7 @@
 </main>
 <footer>
   <div class="source-status"><span><i class="tiny-dot"></i>底表每 <b>15 分钟</b>更新</span><span>本机采集 <b>15 分钟 / 次</b></span><span>预计下次采集 <b id="collector-countdown">—</b></span><span>页面刷新 <b id="countdown">—</b> / 60 秒</span><span>最近查询成功 <b id="last-success">—</b></span><span>耗时 <b id="query-time">—</b></span><span>最新支付 <b id="latest-paid">—</b></span><span>SD 标签 <b id="tag-time">—</b></span></div>
-  <p>GMV 为美西业务日当天累计、美元应付口径。达成率 = 当天累计 GMV ÷ 当天全天目标（经管版）；DAC 为当天支付买家独立去重，不累计小时人数。八国合计不包含其他地区；最新支付时间不等于源表完整水位。</p>
+  <p>GMV 为美西业务日当天累计、美元应付口径。达成率 = 当天累计 GMV ÷ 当天全天目标（经管版）；DAC 为当天支付买家独立去重，不累计小时人数。美亚合计包含八国与一人一国（66国清单），不包含清单外地区；一人一国不是单个国家。最新支付时间不等于源表完整水位。</p>
 </footer>
 </div>
 </body></html>

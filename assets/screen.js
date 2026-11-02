@@ -47,6 +47,8 @@ function currentTargets(){return selectedCountry === 'ALL' ? payload?.targets?.t
 function nnTargetSource(investment=false){
   if(payload?.period_view) return '各业务日冻结的同日目标合计；目标缺项时完整累计达成/GAP留空';
   if(selectedCountry==='ONE') return payload?.targets?.nn_independent_source || '一人一国：原独立目标配置';
+  const correction=payload?.history_view?.target_correction;
+  if(investment && correction && ['IL','ALL'].includes(selectedCountry)) return `11.1 IL NN费率已显式更正：24.50% → 48.00% · 11月追踪表 AP列 · 版本 ${correction.fingerprint.slice(0,12)}；仅费率及派生值更正，原GMV目标及其他目标保持冻结`;
   const meta=payload?.targets?.nn_target_source;
   if(!meta) return '原快照目标来源（未标记为11月追踪表）';
   const detail=meta.status==='ok' ? `读取 ${paidTime(meta.fetched_at)}（美西） · 版本 ${meta.fingerprint.slice(0,12)}` : '目标未齐，相关达成/GAP留空';
@@ -451,7 +453,7 @@ function updateStatus(){
       const missing=Object.entries(historical.metric_status || {}).filter(([,s])=>s!=='full_window').map(([k,s])=>`${k}：${s==='snapshot' ? '截止快照' : '待补齐'}`);
       warnings.push(historical.status==='full_window' ? '全天窗口已回补，非财务封板；仍可能晚到修订' : '最后成功截止快照，不代表全天达成');
       if(missing.length) warnings.push('历史缺项：'+missing.join('、'));
-      text('view-description',`${dayLabel(historical.business_day)} · ${historical.status==='full_window' ? '全天窗口已回补' : '最后快照 / 待回补'} · 归档/回补 ${historical.captured_at ? dayLabel(dateFormat.format(new Date(historical.captured_at)).replaceAll('-',''))+' '+paidTime(historical.captured_at) : '待完成'}（美西） · 目标 ${historical.target_origin==='dated_source_backfill' ? '同日来源回填版本' : '首次留存冻结版本'}`);
+      text('view-description',`${dayLabel(historical.business_day)} · ${historical.status==='full_window' ? '全天窗口已回补' : '最后快照 / 待回补'} · 归档/回补 ${historical.captured_at ? dayLabel(dateFormat.format(new Date(historical.captured_at)).replaceAll('-',''))+' '+paidTime(historical.captured_at) : '待完成'}（美西） · 目标 ${historical.target_origin==='explicit_target_correction' ? '单项显式更正（11.1 IL NN费率）' : historical.target_origin==='dated_source_backfill' ? '同日来源回填版本' : '首次留存冻结版本'}`);
     }
     $('alert').hidden=!warnings.length;$('alert').textContent=warnings.join(' · ');
     $('connection').classList.toggle('good',Boolean(snap && !networkError));$('connection').querySelector('span').textContent='已解密 / 只读历史';

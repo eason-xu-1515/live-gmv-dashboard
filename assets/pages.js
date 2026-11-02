@@ -33,6 +33,10 @@
     if(payload?.kind==='history'){
       const r=payload.record,p=r?.payload;
       if(payload.version!==1 || r?.version!==1 || !validDay(r.business_day) || !/^[a-f0-9]{32}$/.test(r.revision) || r.business_day!==p?.snapshot?.business_day || p.targets?.business_day!==r.business_day || p.snapshot.schema_version!==2 || 'aggregate_rows' in p.snapshot || !/^[a-f0-9]{64}$/.test(r.checksum) || !['snapshot','full_window'].includes(r.status) || !r.metric_status || Object.values(r.metric_status).some(s=>!['snapshot','pending','full_window','missing'].includes(s))) throw new Error('归档结构异常');
+      if(r.target_correction){
+        const c=r.target_correction,v=p.investment?.countries?.IL?.nn;
+        if(r.target_origin!=='explicit_target_correction' || r.business_day!=='20261101' || c.business_day!==r.business_day || c.country!=='IL' || c.metric!=='nn' || c.previous_rate_pct!==24.5 || c.rate_pct!==48 || c.source!=='11月追踪表' || c.column!=='AP' || !/^[a-f0-9]{32}$/.test(c.previous_revision) || !/^[a-f0-9]{64}$/.test(c.fingerprint) || v?.target_rate_pct!==48 || v.target_gmv!==c.target_gmv || p.targets.countries.IL.nn!==c.target_gmv) throw new Error('目标更正结构异常');
+      }else if(r.target_origin==='explicit_target_correction') throw new Error('目标更正证明缺失');
       return payload;
     }
     if(!payload?.snapshot || payload.snapshot.schema_version!==2 || 'aggregate_rows' in payload.snapshot || payload.targets?.business_day!==payload.snapshot.business_day) throw new Error('快照结构异常');
@@ -94,7 +98,7 @@
       const r=value.record;
       if(value.kind!=='history' || r.business_day!==day || r.revision!==item.revision) throw new Error('历史日期或修订不一致');
       if(r.status!==item.status || JSON.stringify(r.metric_status)!==JSON.stringify(item.metric_status)) throw new Error('历史状态与目录不一致');
-      return {...r.payload,history_view:{business_day:day,revision:r.revision,status:r.status,captured_at:r.captured_at,metric_status:r.metric_status,target_origin:r.target_origin}};
+      return {...r.payload,history_view:{business_day:day,revision:r.revision,status:r.status,captured_at:r.captured_at,metric_status:r.metric_status,target_origin:r.target_origin,...(r.target_correction ? {target_correction:r.target_correction} : {})}};
     },async read(){
     if(locked()) return null;
     const version=generation;

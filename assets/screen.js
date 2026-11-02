@@ -42,6 +42,13 @@ function regionName(){return selectedCountry === 'ALL' ? '美亚合计（八国�
 function regionData(code){return payload?.snapshot?.countries?.find(c=>c.code===code);}
 function currentMetrics(){return selectedCountry === 'ALL' ? payload?.snapshot?.totals : regionData(selectedCountry)?.metrics;}
 function currentTargets(){return selectedCountry === 'ALL' ? payload?.targets?.totals : payload?.targets?.countries?.[selectedCountry];}
+function nnTargetSource(investment=false){
+  if(selectedCountry==='ONE') return payload?.targets?.nn_independent_source || '一人一国：原独立目标配置';
+  const meta=payload?.targets?.nn_target_source;
+  if(!meta) return '原快照目标来源（未标记为11月追踪表）';
+  const detail=meta.status==='ok' ? `读取 ${paidTime(meta.fetched_at)}（美西） · 版本 ${meta.fingerprint.slice(0,12)}` : '目标未齐，相关达成/GAP留空';
+  return `11月追踪表 · 核心8国 · ${detail}${selectedCountry==='ALL' ? (investment ? '；投资合计不含一人一国' : '；GMV合计另含一人一国原独立目标') : ''}`;
+}
 function rate(actual,target){return numeric(actual) && numeric(target) && target>0 ? actual/target*100 : null;}
 function rateText(value,signed=false){
   if(!numeric(value)) return '—';
@@ -87,7 +94,7 @@ function renderInvestment(){
       if(missing.length) reasons.push('合计目标缺项：'+missing.join('、'));
     }
     card.querySelector('.investment-status').textContent=[...new Set(reasons)].join(' · ') || '同日快照';
-    card.querySelector('.investment-definition').textContent=note;
+    card.querySelector('.investment-definition').textContent=key==='nn' ? `${note}；目标：${nnTargetSource(true)}` : note;
   });
   const sources=payload?.investment?.sources;
   text('investment-sources',sources ? ['nn','marketing'].map(key=>{
@@ -172,7 +179,8 @@ function render(animate=true){
     flipNumber($(`total-${kpi.key}`),value,animate);
     const card=$(`kpi-${kpi.key}`),foot=card.querySelector('.total-foot');
     foot.textContent=isRate ? (numeric(targets?.[metric]) ? `全天目标 $${compact(targets[metric])}` : '目标未配置') : kpi.key==='dac' ? (numeric(dac) ? '当日支付买家独立去重' : 'DAC 待更新 / 数据不完整') : `${regionName()} · 当日累计 USD`;
-    foot.title=isRate ? `经管版全天目标：$${formatted(targets?.[metric])}` : foot.textContent;
+    if(isRate && metric==='nn') foot.textContent += ` · ${nnTargetSource()}`;
+    foot.title=isRate ? `${metric==='nn' ? nnTargetSource() : '经管版'}全天目标：$${formatted(targets?.[metric])}` : foot.textContent;
     card.querySelector('.rate-bar span').style.width=`${isRate && numeric(value) ? Math.min(100,value) : 0}%`;
   });
   document.querySelectorAll('[data-country]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.country===selectedCountry)));

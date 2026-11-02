@@ -16,7 +16,7 @@ const investmentKeys = [
   {key:'sd_nonbrand',label:'SD非品牌TR',note:'非品牌常规花费 ÷ 同小时SD业务GMV'},
   {key:'incremental',label:'整体增投TR',note:'全部增投资金花费 ÷ 同小时大盘业务GMV'}
 ];
-const investmentReasons = {source_failed:'投资源待更新',source_timeout:'投资源查询超时',source_invalid:'投资源校验未通过',target_missing:'目标缺项，GAP留空',target_scope:'目标资金范围待核验',denominator_missing:'对应GMV缺失或为零',hour_missing:'业务GMV小时缺失',no_safe_hour:'暂无安全截止小时',unknown_fund:'含未识别资金实际',unbudgeted:'含预算外实际',nn_hour_unknown:'NN小时截止未知',cross_source:'跨源近实时',expired:'原快照已过期，等待更新',target_invalid:'目标版本待核验',day_changed:'业务日已切换',dst_watermark:'重复小时水位待核验'};
+const investmentReasons = {history_scope:'历史全天来源/维表待补齐',source_failed:'投资源待更新',source_timeout:'投资源查询超时',source_invalid:'投资源校验未通过',target_missing:'目标缺项，GAP留空',target_scope:'目标资金范围待核验',denominator_missing:'对应GMV缺失或为零',hour_missing:'业务GMV小时缺失',no_safe_hour:'暂无安全截止小时',unknown_fund:'含未识别资金实际',unbudgeted:'含预算外实际',nn_hour_unknown:'NN小时截止未知',cross_source:'跨源近实时',expired:'原快照已过期，等待更新',target_invalid:'目标版本待核验',day_changed:'业务日已切换',dst_watermark:'重复小时水位待核验'};
 const countries = [['US','美国'],['BR','巴西'],['MX','墨西哥'],['CL','智利'],['KR','韩国'],['JP','日本'],['IL','以色列'],['GCC','GCC'],['ONE','一人一国']];
 const oneCountryIso = 'COL CHE NOR PER THA SGP PAK ARG MYS SRB REU HKG LKA AGO ISL ALB MTQ VNM CRI BGD SLV PHL GLP MUS PRI GUF TZA MOZ SYC KHM MKD PYF ZMB BOL CPV BIH PRY UGA MDV MNE NIC BRN NCL CIV DOM GTM TWN SEN MDG BWA BFA ZWE URY TUN JOR MWI RWA MMR GIN HND PNG ABW GNQ FRO NPL NAM'.split(' ');
 const iso = {USA:'US',BRA:'BR',MEX:'MX',CHL:'CL',KOR:'KR',JPN:'JP',ISR:'IL',SAU:'GCC',ARE:'GCC',QAT:'GCC',KWT:'GCC',BHR:'GCC',OMN:'GCC',...Object.fromEntries(oneCountryIso.map(code=>[code,'ONE']))};
@@ -32,6 +32,8 @@ const $ = id => document.getElementById(id);
 let selectedCountry = 'ALL', selected = 'total', trendMode = 'hourly', payload = null;
 let nextPoll = Date.now()+60000, offset = 0, fetchRunning = false, networkError = false, mapLoaded = false;
 let responseGeneration = 0, suspended = false;
+let livePayload=null, catalog=null, selectedDate=null, viewMode='day', selectionGeneration=0;
+const historyCache=new Map(), historyDownloads=new Set();
 
 function text(id,value){$(id).textContent=value;}
 function numeric(value){return typeof value === 'number' && Number.isFinite(value);}
@@ -43,6 +45,7 @@ function regionData(code){return payload?.snapshot?.countries?.find(c=>c.code===
 function currentMetrics(){return selectedCountry === 'ALL' ? payload?.snapshot?.totals : regionData(selectedCountry)?.metrics;}
 function currentTargets(){return selectedCountry === 'ALL' ? payload?.targets?.totals : payload?.targets?.countries?.[selectedCountry];}
 function nnTargetSource(investment=false){
+  if(payload?.period_view) return '各业务日冻结的同日目标合计；目标缺项时完整累计达成/GAP留空';
   if(selectedCountry==='ONE') return payload?.targets?.nn_independent_source || '一人一国：原独立目标配置';
   const meta=payload?.targets?.nn_target_source;
   if(!meta) return '原快照目标来源（未标记为11月追踪表）';
@@ -67,6 +70,7 @@ function investmentData(){
   return selectedCountry==='ALL' ? block.totals : block.countries?.[selectedCountry];
 }
 function investmentExpired(value){
+  if(payload?.history_view || payload?.period_view) return false;
   const now=Date.now()+offset;
   return !value?.source_success_at || !Number.isFinite(Date.parse(value.source_success_at)) ||
     now-Date.parse(value.source_success_at)>1800000 || Date.parse(value.source_success_at)-now>300000 ||
@@ -84,7 +88,7 @@ function renderInvestment(){
     const gap=usable && numeric(v.gap_pp) ? v.gap_pp : null;
     card.querySelector('.investment-gap').textContent=numeric(gap) ? `${rateText(gap,true)} pp · ${gap>0 ? '高于目标' : gap<0 ? '低于目标' : '与目标一致'}` : 'GAP —';
     card.querySelector('.investment-basis').textContent=usable ? `花费 $${formatted(v.spend)} / 对应GMV $${formatted(v.gmv)}` : '花费 / 对应GMV 待更新';
-    card.querySelector('.investment-time').textContent=v?.source_success_at ? `${v.status==='stale' ? '原来源成功' : '来源成功'} ${paidTime(v.source_success_at)}（美西） · ${Number.isInteger(v.cutoff_hour) ? '同小时截取至 '+String(v.cutoff_hour).padStart(2,'0')+':00' : '小时截止未知'}` : '来源时间待更新';
+    card.querySelector('.investment-time').textContent=payload?.period_view ? '按日期、国家及相同资金范围合计；不平均每日费率' : v?.source_success_at ? `${v.status==='stale' ? '原来源成功' : '来源成功'} ${paidTime(v.source_success_at)}（美西） · ${Number.isInteger(v.cutoff_hour) ? '同小时截取至 '+String(v.cutoff_hour).padStart(2,'0')+':00' : '小时截止未知'}` : '来源时间待更新';
     const reasons=(v?.reason_codes || []).map(reason=>investmentReasons[reason]).filter(Boolean);
     if(expired) reasons.push('原快照已过期，等待更新');
     if(v?.status==='stale' && !expired) reasons.unshift('待更新：完整保留原费率、分母与目标');
@@ -94,16 +98,125 @@ function renderInvestment(){
       if(missing.length) reasons.push('合计目标缺项：'+missing.join('、'));
     }
     card.querySelector('.investment-status').textContent=[...new Set(reasons)].join(' · ') || '同日快照';
-    card.querySelector('.investment-definition').textContent=key==='nn' ? `${note}；目标：${nnTargetSource(true)}` : note;
+    card.querySelector('.investment-definition').textContent=payload?.period_view ? '累计花费 ÷ 累计对应GMV；目标＝累计预算 ÷ 累计同日目标GMV；非财务封板' : key==='nn' ? `${note}；目标：${nnTargetSource(true)}` : note;
   });
   const sources=payload?.investment?.sources;
-  text('investment-sources',sources ? ['nn','marketing'].map(key=>{
+  text('investment-sources',payload?.period_view ? '分日冻结的来源与目标；按同国家、同资金范围累计，缺日或缺目标不显示完整累计。' : sources ? ['nn','marketing'].map(key=>{
     const s=sources[key];return `${key==='nn' ? 'NN' : '营销'}查询 ${paidTime(s?.query_started_at)}–${paidTime(s?.query_finished_at)}（美西，查询时间不是数据水位） · ${s?.status==='ok' ? '本轮来源成功' : '本轮来源待更新'}`;
   }).join('；') : '投资数据待接入；缺目标与未取得的数据均留空。');
 }
 function clearSensitive(){
-  responseGeneration++;payload=null;offset=0;networkError=false;render(false);
+  responseGeneration++;selectionGeneration++;payload=null;livePayload=null;catalog=null;
+  selectedDate=null;viewMode='day';historyCache.clear();offset=0;networkError=false;render(false);
+  const select=$('history-date');if(select?.replaceChildren) select.replaceChildren();
+  text('chart-detail','数据已清除');text('view-description','请重新登录或解密');
 }
+function dayLabel(day){return /^\d{8}$/.test(day || '') ? `${day.slice(4,6)}.${day.slice(6)}` : '—';}
+function currentDay(){return dateFormat.format(new Date(Date.now()+offset)).replaceAll('-','');}
+function validDay(day){
+  if(!/^\d{8}$/.test(day || '')) return false;
+  const d=new Date(`${day.slice(0,4)}-${day.slice(4,6)}-${day.slice(6)}T12:00:00Z`);
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10).replaceAll('-','')===day;
+}
+function periodDays(until){
+  if(!validDay(until)) return [];
+  const end=until<'20261118' ? until : '20261118',days=[];
+  for(let d=new Date('2026-10-31T12:00:00Z');d.toISOString().slice(0,10).replaceAll('-','')<=end;d.setUTCDate(d.getUTCDate()+1)){
+    days.push(d.toISOString().slice(0,10).replaceAll('-',''));
+  }
+  return days;
+}
+function cumulativePayload(days,members,today){
+  // 逐日逐国先合计金额；任一必要日期缺失，不把部分和冒充完整累计。
+  const missing=new Set(),keys=['total','nn','sd'],series={};
+  const sum=values=>values.length && values.every(numeric) ? values.reduce((a,b)=>a+b,0) : null;
+  const ready=(p,day,key)=>p?.snapshot?.business_day===day && (day===today ?
+    p.snapshot.complete && !p.error && Number.isFinite(Date.parse(p.snapshot.success_at)) &&
+    Date.now()+offset-Date.parse(p.snapshot.success_at)>=-300000 && Date.now()+offset-Date.parse(p.snapshot.success_at)<=1800000 :
+    p.history_view?.metric_status?.[key]==='full_window');
+  const amount=(day,code,key,target=false)=>{
+    const p=members[day],r=p?.snapshot?.countries?.find(c=>c.code===code);
+    const v=target ? p?.targets?.business_day===day ? p.targets.countries?.[code]?.[key] : null : ready(p,day,key) ? r?.metrics?.[key] : null;
+    if(!numeric(v)) missing.add(`${dayLabel(day)} ${code} ${target ? '目标' : '全天实际'} ${key}`);
+    return numeric(v) ? v : null;
+  };
+  const regions=countries.map(([code,name])=>({code,name,dac:null,hours:[],metrics:Object.fromEntries(keys.map(k=>[k,sum(days.map(d=>amount(d,code,k)))]))}));
+  const targetsBy=Object.fromEntries(countries.map(([code])=>[code,Object.fromEntries(keys.map(k=>[k,sum(days.map(d=>amount(d,code,k,true)))]))]));
+  for(const code of ['ALL',...countries.map(([c])=>c)]){
+    const codes=code==='ALL' ? countries.map(([c])=>c) : [code];
+    series[code]=days.map((day,i)=>({day,...Object.fromEntries(keys.map(k=>[k,sum(days.slice(0,i+1).flatMap(d=>codes.map(c=>amount(d,c,k))))]))}));
+  }
+  const aggregateInvestment=(codes,key)=>{
+    const entries=days.flatMap(day=>codes.map(code=>{
+      const p=members[day],v=p?.investment?.version===2 && p.investment.business_day===day ? p.investment.countries?.[code]?.[key] : null;
+      const sourceAge=Date.now()+offset-Date.parse(v?.source_success_at);
+      const available=ready(p,day,'tr_'+key) && ['ok','stale'].includes(v?.status) && numeric(v.spend) && numeric(v.gmv) &&
+        (day!==today || Number.isFinite(sourceAge) && sourceAge>=-300000 && sourceAge<=1800000);
+      if(!available) missing.add(`${dayLabel(day)} ${code} TR实际 ${key}`);
+      if(!numeric(v?.budget) || !numeric(v?.target_gmv)) missing.add(`${dayLabel(day)} ${code} TR目标 ${key}`);
+      return {v,available};
+    }));
+    const actual=entries.length && entries.every(e=>e.available),spend=actual ? sum(entries.map(e=>e.v.spend)) : null,gmv=actual ? sum(entries.map(e=>e.v.gmv)) : null;
+    const budget=sum(entries.map(e=>e.v?.budget)),target_gmv=sum(entries.map(e=>e.v?.target_gmv));
+    const rate_pct=rate(spend,gmv),target_rate_pct=rate(budget,target_gmv);
+    return {spend,gmv,budget,target_gmv,rate_pct,target_rate_pct,gap_pp:numeric(rate_pct)&&numeric(target_rate_pct) ? rate_pct-target_rate_pct : null,
+      status:numeric(rate_pct) ? 'ok' : 'waiting',source_success_at:actual ? entries.map(e=>e.v.source_success_at).sort()[0] : null,cutoff_hour:null,
+      reason_codes:[...(actual ? [] : ['history_scope']),...(numeric(target_rate_pct) ? [] : ['target_missing'])]};
+  };
+  const by=Object.fromEntries(countries.map(([c])=>[c,Object.fromEntries(investmentKeys.map(({key})=>[key,aggregateInvestment([c],key)]))]));
+  const end=days.at(-1) || today;
+  return {snapshot:{business_day:end,schema_version:2,complete:true,countries:regions,dac:null,totals:Object.fromEntries(keys.map(k=>[k,sum(regions.map(c=>c.metrics[k]))]))},
+    targets:{business_day:end,countries:targetsBy,totals:Object.fromEntries(keys.map(k=>[k,sum(Object.values(targetsBy).map(c=>c[k]))]))},
+    investment:{version:2,business_day:end,countries:by,totals:Object.fromEntries(investmentKeys.map(({key})=>[key,aggregateInvestment(countries.filter(([c])=>c!=='ONE').map(([c])=>c),key)]))},
+    period_view:{days,missing:[...missing],includes_today:days.includes(today),series},server_time:new Date(Date.now()+offset).toISOString()};
+}
+function updateDateControls(){
+  const select=$('history-date');if(!select?.replaceChildren) return;
+  const today=currentDay(),days=[...new Set([today,...Object.keys(catalog?.days || {}),...(selectedDate ? [selectedDate] : [])])].sort().reverse();
+  select.replaceChildren(...days.map(day=>{const option=document.createElement('option');option.value=day;
+    option.textContent=`${dayLabel(day)}${day===today ? ' · 今日实时' : catalog?.days?.[day]?.status==='full_window' ? ' · 全天窗口已回补' : ' · 快照 / 待回补'}`;return option;}));
+  select.value=selectedDate || today;
+  document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===viewMode)));
+}
+async function localRead(path,optional=false){
+  const response=await fetch(path,{cache:'no-store',signal:AbortSignal.timeout(15000)});
+  if(response.status===401){suspended=true;clearSensitive();location.replace('/login');return null;}
+  if(optional && response.status===404) return null;
+  if(!response.ok) throw new Error('历史缓存读取失败');return response.json();
+}
+async function historyMember(day,item,version){
+  if(!item?.revision) return null;
+  const cacheKey=`${day}:${item.revision}:${item.sha256 || ''}`;
+  if(historyCache.has(cacheKey)) return historyCache.get(cacheKey);
+  while(historyDownloads.size>=3) await Promise.race(historyDownloads);
+  if(version!==responseGeneration || suspended || window.liveDataSource?.locked()) return null;
+  const request=(async()=>{
+    try{
+      const value=window.liveDataSource ? await window.liveDataSource.readHistory(day,item) : await localRead(`/api/history/${day}`,true);
+      if(version!==responseGeneration || suspended || window.liveDataSource?.locked()) return null;
+      if(value && (value.snapshot?.business_day!==day || value.targets?.business_day!==day || value.history_view?.revision!==item.revision && !window.liveDataSource)) throw new Error('历史版本不一致');
+      if(value){historyCache.set(cacheKey,value);if(historyCache.size>60) historyCache.delete(historyCache.keys().next().value);}
+      return value;
+    }catch(error){if(version===responseGeneration && !suspended) networkError=true;return null;}
+  })();
+  historyDownloads.add(request);
+  try{return await request;}finally{historyDownloads.delete(request);}
+}
+async function selectView(){
+  const choice=++selectionGeneration,version=responseGeneration,today=currentDay(),day=selectedDate || today;
+  updateDateControls();
+  if(viewMode==='day' && !selectedDate){payload=livePayload;render();return;}
+  payload=null;render(false);text('view-description','正在读取已保存的历史；不触发取数');
+  const directory=catalog,members={};
+  const days=viewMode==='period' ? periodDays(day) : [day];
+  await Promise.all(days.map(async d=>{
+    members[d]=d===today && livePayload?.snapshot?.business_day===d ? livePayload : await historyMember(d,directory?.days?.[d],version);
+  }));
+  if(choice!==selectionGeneration || version!==responseGeneration || suspended || window.liveDataSource?.locked()) return;
+  payload=viewMode==='period' ? cumulativePayload(days,members,today) : members[day] || {snapshot:null,history_view:{business_day:day,status:'pending'}};
+  render(false);
+}
+
 function half(char,position,extra=''){
   const node=document.createElement('span');node.className=`half ${position} ${extra}`;
   const glyph=document.createElement('span');glyph.className='glyph';glyph.textContent=char;node.append(glyph);return node;
@@ -178,7 +291,7 @@ function render(animate=true){
     const value=isRate ? rate(values?.[metric],targets?.[metric]) : kpi.key==='dac' ? dac : values?.[kpi.key];
     flipNumber($(`total-${kpi.key}`),value,animate);
     const card=$(`kpi-${kpi.key}`),foot=card.querySelector('.total-foot');
-    foot.textContent=isRate ? (numeric(targets?.[metric]) ? `全天目标 $${compact(targets[metric])}` : '目标未配置') : kpi.key==='dac' ? (numeric(dac) ? '当日支付买家独立去重' : 'DAC 待更新 / 数据不完整') : `${regionName()} · 当日累计 USD`;
+    foot.textContent=isRate ? (numeric(targets?.[metric]) ? `${payload?.period_view ? '累计同日目标' : '全天目标'} $${compact(targets[metric])}` : '目标未配置 / 日期缺项') : kpi.key==='dac' ? (payload?.period_view ? '需跨日独立去重；不累加每日DAC' : numeric(dac) ? '当日支付买家独立去重' : 'DAC 待更新 / 数据不完整') : `${regionName()} · ${payload?.period_view ? '波段累计' : '单日累计'} USD`;
     if(isRate && metric==='nn') foot.textContent += ` · ${nnTargetSource()}`;
     foot.title=isRate ? `${metric==='nn' ? nnTargetSource() : '经管版'}全天目标：$${formatted(targets?.[metric])}` : foot.textContent;
     card.querySelector('.rate-bar span').style.width=`${isRate && numeric(value) ? Math.min(100,value) : 0}%`;
@@ -191,7 +304,10 @@ function render(animate=true){
     b.querySelector('b').textContent=numeric(regionData(b.dataset.market)?.metrics?.[selected]) ? `$${compact(regionData(b.dataset.market).metrics[selected])}` : '—';
   });
   text('trend-country',regionName());text('last-success',paidTime(snap?.success_at));text('latest-paid',paidTime(snap?.latest_paid));
-  text('query-time',snap ? `${snap.query_seconds.toFixed(1)}s` : '—');text('tag-time',snap ? `${snap.tag_snapshot.ds} / ${snap.tag_snapshot.hh}:00` : '—');
+  text('query-time',numeric(snap?.query_seconds) ? `${snap.query_seconds.toFixed(1)}s` : '—');text('tag-time',snap?.tag_snapshot ? `${snap.tag_snapshot.ds} / ${snap.tag_snapshot.hh}:00` : '—');
+  text('trend-title',payload?.period_view ? '波段逐日累计趋势' : '小时成交趋势');
+  text('trend-note',payload?.period_view ? '逐日累计金额；缺日处留空，不补零；DAC需跨日独立去重。' : '按支付小时聚合，不是刷新差额；历史全天窗口已回补不等于财务封板，仍可能晚到修订。');
+  document.querySelectorAll('[data-trend]').forEach(b=>{b.disabled=Boolean(payload?.period_view);});
   paintMap();renderTrend();renderInvestment();fitNumbers();updateStatus();
 }
 function svgNode(tag,attrs={},content){
@@ -263,9 +379,12 @@ function hourlyValues(){
     if(rows.some(row=>!row)) return null;
     if(trendMode==='cumulative'){
       // 从原始小时结果分别累计，不能因较早某小时未显示而漏掉已观测成交。
-      return Object.fromEntries(metrics.map(m=>[m.key,regions.reduce((sum,c)=>sum+c.hours.filter(h=>h.hour<=hour).reduce((v,h)=>v+h.metrics[m.key],0),0)]));
+      return Object.fromEntries(metrics.map(m=>{
+        const values=regions.flatMap(c=>c.hours.filter(h=>h.hour<=hour).map(h=>h.metrics[m.key]));
+        return [m.key,values.every(numeric) ? values.reduce((a,b)=>a+b,0) : null];
+      }));
     }
-    return Object.fromEntries(metrics.map(m=>[m.key,rows.reduce((sum,row)=>sum+row[m.key],0)]));
+    return Object.fromEntries(metrics.map(m=>[m.key,rows.every(row=>numeric(row[m.key])) ? rows.reduce((sum,row)=>sum+row[m.key],0) : null]));
   });
 }
 function describeHour(hour,values){
@@ -274,45 +393,77 @@ function describeHour(hour,values){
   return `${String(hour).padStart(2,'0')}:00${partial ? '（未结束）' : ''} · ${values ? metrics.map(m=>`${m.label} $${formatted(values[m.key])}`).join(' / ') : '数据未取得'}`;
 }
 function renderTrend(){
-  const data=hourlyValues(),chart=$('hour-chart');chart.replaceChildren();
-  $('trend-empty').hidden=data.some(Boolean);
-  const left=64,right=613,top=28,bottom=318,x=hour=>left+(right-left)*hour/23;
-  const max=Math.max(1,...data.filter(Boolean).flatMap(row=>metrics.map(m=>row[m.key])))*1.15,y=value=>bottom-(bottom-top)*value/max;
+  const period=payload?.period_view,data=period ? period.series[selectedCountry] || [] : hourlyValues(),chart=$('hour-chart');chart.replaceChildren();
+  chart.setAttribute('aria-label',period ? '波段逐日累计GMV、NN、SD曲线' : '每小时GMV、NN、SD曲线');
+  if($('trend-axis')) text('trend-axis',period ? '日期' : '美西小时');
+  if($('trend-table-title')) text('trend-table-title',period ? '查看逐日累计数据表' : '查看小时数据表');
+  const has=row=>row && metrics.some(m=>numeric(row[m.key]));
+  const describe=(i,row)=>period ? `${dayLabel(row?.day || period.days[i])} · ${metrics.map(m=>`${m.label} $${formatted(row?.[m.key])}`).join(' / ')}` : describeHour(i,row);
+  $('trend-empty').hidden=data.some(has);
+  const left=64,right=613,top=28,bottom=318,x=index=>left+(right-left)*index/Math.max(1,data.length-1);
+  const max=Math.max(1,...data.filter(has).flatMap(row=>metrics.map(m=>row[m.key]).filter(numeric)))*1.15,y=value=>bottom-(bottom-top)*value/max;
   for(let step=0;step<=4;step++){
     const value=max*step/4,cy=y(value);chart.append(svgNode('line',{x1:left,x2:right,y1:cy,y2:cy,class:'chart-grid'}),
       svgNode('text',{x:left-10,y:cy+4,class:'chart-text','text-anchor':'end'},compact(value)));
   }
   chart.append(svgNode('line',{x1:left,x2:right,y1:bottom,y2:bottom,class:'chart-axis'}),svgNode('text',{x:left,y:15,class:'chart-text'},'USD'));
-  for(const hour of [0,3,6,9,12,15,18,21,23]) chart.append(svgNode('text',{x:x(hour),y:bottom+22,class:'chart-text','text-anchor':'middle'},`${String(hour).padStart(2,'0')}:00`));
+  const ticks=period ? data.map((_,i)=>i).filter(i=>i===data.length-1 || i%Math.max(1,Math.ceil(data.length/7))===0) : [0,3,6,9,12,15,18,21,23];
+  for(const i of ticks) chart.append(svgNode('text',{x:x(i),y:bottom+22,class:'chart-text','text-anchor':'middle'},period ? dayLabel(data[i].day) : `${String(i).padStart(2,'0')}:00`));
   const now=new Date(Date.now()+offset),day=dateFormat.format(now).replaceAll('-',''),hour=Number(hourFormat.format(now));
-  if(payload?.snapshot?.business_day===day){
+  if(!period && !payload?.history_view && payload?.snapshot?.business_day===day){
     chart.append(svgNode('rect',{x:x(hour)-7,y:top,width:14,height:bottom-top,fill:'#149cd410'}),
       svgNode('line',{x1:x(hour),x2:x(hour),y1:top,y2:bottom,stroke:'#2585a6','stroke-dasharray':'3 5'}),
       svgNode('text',{x:Math.min(right-53,x(hour)+4),y:top-9,class:'chart-current'},`${hour}点未结束`));
   }
   metrics.forEach(metric=>{
     let d='',connected=false;
-    data.forEach((row,h)=>{if(!row){connected=false;return;}d+=`${connected ? 'L' : 'M'}${x(h).toFixed(2)},${y(row[metric.key]).toFixed(2)} `;connected=true;});
+    data.forEach((row,h)=>{if(!numeric(row?.[metric.key])){connected=false;return;}d+=`${connected ? 'L' : 'M'}${x(h).toFixed(2)},${y(row[metric.key]).toFixed(2)} `;connected=true;});
     chart.append(svgNode('path',{d,class:'chart-line',stroke:colors[metric.key],'data-series':metric.key}));
-    data.forEach((row,h)=>{if(row) chart.append(svgNode('circle',{cx:x(h),cy:y(row[metric.key]),r:3,fill:colors[metric.key],class:'chart-point'}));});
+    data.forEach((row,h)=>{if(numeric(row?.[metric.key])) chart.append(svgNode('circle',{cx:x(h),cy:y(row[metric.key]),r:3,fill:colors[metric.key],class:'chart-point'}));});
   });
   data.forEach((row,h)=>{
-    if(!row) return;
-    const hit=svgNode('rect',{x:x(h)-10,y:top,width:20,height:bottom-top,class:'chart-hit',tabindex:0,role:'img','aria-label':describeHour(h,row)});
-    hit.append(svgNode('title',{},describeHour(h,row)));const show=()=>text('chart-detail',describeHour(h,row));
+    if(!has(row)) return;
+    const hit=svgNode('rect',{x:x(h)-10,y:top,width:20,height:bottom-top,class:'chart-hit',tabindex:0,role:'img','aria-label':describe(h,row)});
+    hit.append(svgNode('title',{},describe(h,row)));const show=()=>text('chart-detail',describe(h,row));
     hit.addEventListener('pointerenter',show);hit.addEventListener('focus',show);chart.append(hit);
   });
   $('hour-details').replaceChildren(...data.map((row,h)=>{
-    const tr=document.createElement('tr');const first=document.createElement('td');first.textContent=`${String(h).padStart(2,'0')}:00`;tr.append(first);
+    const tr=document.createElement('tr');const first=document.createElement('td');first.textContent=period ? dayLabel(row.day) : `${String(h).padStart(2,'0')}:00`;tr.append(first);
     metrics.forEach(m=>{const td=document.createElement('td');td.textContent=formatted(row?.[m.key]);tr.append(td);});return tr;
   }));
-  const latest=data.reduce((last,row,h)=>row ? h : last,-1);
-  text('chart-detail',latest>=0 ? describeHour(latest,data[latest]) : '小时数据待更新；不会生成模拟成交曲线');
+  const latest=data.reduce((last,row,h)=>has(row) ? h : last,-1);
+  text('chart-detail',latest>=0 ? describe(latest,data[latest]) : '数据待补齐；不会生成模拟成交曲线');
 }
 function updateStatus(){
   const snap=payload?.snapshot,now=Date.now()+offset,currentDay=dateFormat.format(new Date(now)).replaceAll('-','');
+  const historical=payload?.history_view,period=payload?.period_view;
+  if(historical || period){
+    const warnings=[];
+    if(networkError) warnings.push('网络 / 历史版本暂不可用，缺项不拼接');
+    if(catalog?.health?.history_error) warnings.push('历史归档或回补未完成，保留已验证修订');
+    if(period){
+      if(!period.days.length) warnings.push('所选日期早于10.31，尚无波段累计');
+      if(period.missing.length) warnings.push(`累计缺项（${period.missing.length}项）：${period.missing.join('；')}`);
+      if(period.includes_today) warnings.push('含今日截至快照实际及今日全天目标；今日尚未结束');
+      text('view-description',`10.31—${dayLabel(period.days.at(-1))} 波段累计 · 非财务封板 · DAC需跨日独立去重`);
+    }else{
+      if(!snap) warnings.push('该日期尚无有效快照，等待正式循环回补');
+      const missing=Object.entries(historical.metric_status || {}).filter(([,s])=>s!=='full_window').map(([k,s])=>`${k}：${s==='snapshot' ? '截止快照' : '待补齐'}`);
+      warnings.push(historical.status==='full_window' ? '全天窗口已回补，非财务封板；仍可能晚到修订' : '最后成功截止快照，不代表全天达成');
+      if(missing.length) warnings.push('历史缺项：'+missing.join('、'));
+      text('view-description',`${dayLabel(historical.business_day)} · ${historical.status==='full_window' ? '全天窗口已回补' : '最后快照 / 待回补'} · 归档/回补 ${historical.captured_at ? dayLabel(dateFormat.format(new Date(historical.captured_at)).replaceAll('-',''))+' '+paidTime(historical.captured_at) : '待完成'}（美西） · 目标 ${historical.target_origin==='dated_source_backfill' ? '同日来源回填版本' : '首次留存冻结版本'}`);
+    }
+    $('alert').hidden=!warnings.length;$('alert').textContent=warnings.join(' · ');
+    $('connection').classList.toggle('good',Boolean(snap && !networkError));$('connection').querySelector('span').textContent='已解密 / 只读历史';
+    const day=historical?.business_day || snap?.business_day;text('business-day',day ? `${day.slice(0,4)}.${day.slice(4,6)}.${day.slice(6)}` : '—');return;
+  }
+  text('view-description','今日实时 · 15分钟为尝试周期，不是成功保证');
   const outdated=snap && (snap.business_day!==currentDay || (now-Date.parse(snap.success_at))/1000>(payload?.stale_after_seconds || 1800));
   const warnings=[];
+  const health=catalog?.health,failures={pay_partition_waiting:'今日支付分区未到达',tag_partition_waiting:'今日标签分区未到达',timeout:'查询超时',day_changed:'轮次跨日已拒绝',invalid_result:'结果校验未通过',storage_failed:'保存失败',start_failed:'查询未启动',remote_failed:'来源失败'};
+  if(health?.error_code) warnings.push(failures[health.error_code] || '本轮未取得有效数据');
+  if(health?.history_error) warnings.push('历史归档或回补未完成，当前成功快照独立保留');
+  if(health?.success_at && snap?.success_at && Date.parse(health.success_at)>Date.parse(snap.success_at)) warnings.push('已采集 / 提交，页面尚未观察到新版');
   if(networkError) warnings.push('页面连接中断，保留最后成功快照');
   if(!snap) warnings.push(payload?.error || '正在查询真实成交，首次取数可能需要较长时间');
   if(snap?.business_day!==currentDay && snap) warnings.push(`当前 ${currentDay}；显示 ${snap.business_day} 历史快照和同日目标，等待新业务日数据`);
@@ -345,11 +496,21 @@ async function refresh(){
     if(version!==responseGeneration || suspended || window.liveDataSource?.locked()) return;
     if(!fresh || !fresh.server_time || !('snapshot' in fresh)) throw new Error('响应异常');
     // 静态快照时间不是实时服务器时钟，不能反复把浏览器时钟拨回采集时刻。
-    offset=window.liveDataSource ? 0 : Date.parse(fresh.server_time)-Date.now();payload=fresh;networkError=false;render();
+    offset=window.liveDataSource ? 0 : Date.parse(fresh.server_time)-Date.now();livePayload=fresh;networkError=false;
+    try{
+      const directory=window.liveDataSource ? await window.liveDataSource.readCatalog?.() : await localRead('/api/history',true);
+      if(version!==responseGeneration || suspended || window.liveDataSource?.locked()) return;
+      if(directory) catalog=directory;
+    }catch(error){networkError=true;}
+    if(version!==responseGeneration || suspended || window.liveDataSource?.locked()) return;
+    await selectView();
   }catch(error){if(version===responseGeneration && !suspended){networkError=true;updateStatus();}}
   finally{fetchRunning=false;if(Date.now()>=nextPoll) nextPoll=Date.now()+60000;}
 }
 $('fullscreen').addEventListener('click',async()=>{try{if(document.fullscreenElement) await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch(error){$('fullscreen').title='浏览器当前不允许全屏';}});
+$('history-date')?.addEventListener('change',event=>{selectedDate=event.target.value===currentDay() ? null : event.target.value;selectView();});
+$('today-live')?.addEventListener('click',()=>{selectedDate=null;viewMode='day';selectView();});
+document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>{viewMode=button.dataset.view;selectView();}));
 document.addEventListener('fullscreenchange',()=>{const label=document.fullscreenElement ? '退出全屏' : '进入全屏';$('fullscreen').title=label;$('fullscreen').setAttribute('aria-label',label);});
 $('logout').addEventListener('click',async()=>{suspended=true;clearSensitive();if(window.liveDataSource){window.liveDataSource.lock();return;}try{const response=await fetch('/api/logout',{method:'POST'});if(response.ok) location.replace('/login');}catch(error){networkError=true;updateStatus();}});
 window.addEventListener('live-unlocked',()=>{suspended=false;refresh();});
@@ -361,7 +522,8 @@ window.addEventListener('resize',()=>requestAnimationFrame(fitNumbers));
 initialize();refresh();
 setInterval(()=>{
   text('clock',timeFormat.format(new Date(Date.now()+offset)));text('countdown',`${Math.max(0,Math.ceil((nextPoll-Date.now())/1000))}s`);
-  const left=payload?.next_refresh_at ? Math.max(0,Math.ceil((Date.parse(payload.next_refresh_at)-Date.now()-offset)/1000)) : null;
-  text('collector-countdown',payload?.query_running ? '进行中' : left===null ? '—' : left===0 ? (window.liveDataSource ? '等待新快照' : '即将取数') : `${Math.floor(left/60)}分${String(left%60).padStart(2,'0')}秒`);
+  const status=catalog?.health || livePayload || payload;
+  const left=status?.next_refresh_at ? Math.max(0,Math.ceil((Date.parse(status.next_refresh_at)-Date.now()-offset)/1000)) : null;
+  text('collector-countdown',status?.query_running ? '进行中' : left===null ? '—' : left===0 ? (window.liveDataSource ? '等待新快照' : '即将取数') : `${Math.floor(left/60)}分${String(left%60).padStart(2,'0')}秒`);
   updateStatus();renderInvestment();if(Date.now()>=nextPoll && !fetchRunning) refresh();
 },1000);

@@ -14,10 +14,27 @@
     const source=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveKey']);
     return crypto.subtle.deriveKey({name:'PBKDF2',hash:'SHA-256',salt:bytes(envelope.salt),iterations:600000},source,{name:'AES-GCM',length:256},false,['decrypt']);
   }
+  function validDay(day){
+    if(typeof day!=='string' || !/^\d{8}$/.test(day)) return false;
+    const date=new Date(`${day.slice(0,4)}-${day.slice(4,6)}-${day.slice(6)}T12:00:00Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10).replaceAll('-','')===day;
+  }
   async function decrypt(envelope,key,username){
     validate(envelope);
     const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(envelope.iv),tagLength:128,additionalData:encoder.encode(`live-gmv-pages:1:${username}`)},key,bytes(envelope.ciphertext));
     const payload=JSON.parse(decoder.decode(plain));
+    if(payload?.kind==='catalog'){
+      if(payload.version!==1 || !payload.days || typeof payload.days!=='object' || Array.isArray(payload.days) || !validDay(payload.business_day) || payload.period?.start!=='20261031' || payload.period?.end!=='20261118') throw new Error('目录结构异常');
+      for(const [day,item] of Object.entries(payload.days)){
+        if(!validDay(day) || day>=payload.business_day || !item || !['snapshot','pending','full_window','missing'].includes(item.status) || item.path && (item.path!==`history/${day}.${item.revision}.enc.json` || !/^[a-f0-9]{32}$/.test(item.revision) || !/^[a-f0-9]{64}$/.test(item.sha256))) throw new Error('目录路径异常');
+      }
+      return payload;
+    }
+    if(payload?.kind==='history'){
+      const r=payload.record,p=r?.payload;
+      if(payload.version!==1 || r?.version!==1 || !validDay(r.business_day) || !/^[a-f0-9]{32}$/.test(r.revision) || r.business_day!==p?.snapshot?.business_day || p.targets?.business_day!==r.business_day || p.snapshot.schema_version!==2 || 'aggregate_rows' in p.snapshot || !/^[a-f0-9]{64}$/.test(r.checksum) || !['snapshot','full_window'].includes(r.status) || !r.metric_status || Object.values(r.metric_status).some(s=>!['snapshot','pending','full_window','missing'].includes(s))) throw new Error('归档结构异常');
+      return payload;
+    }
     if(!payload?.snapshot || payload.snapshot.schema_version!==2 || 'aggregate_rows' in payload.snapshot || payload.targets?.business_day!==payload.snapshot.business_day) throw new Error('快照结构异常');
     return payload;
   }
@@ -28,8 +45,9 @@
   if(typeof window==='undefined' || !document.getElementById('pages-gate')) return;
   const $=id=>document.getElementById(id), TTL=8*3600*1000;
   let key=null, username='', salt='', expires=0, wallExpires=0, timer=null, generation=0, cached=null, lastCipher='';
+  const historicalCache=new Map();
   function lock(message=''){
-    generation++;key=null;username='';salt='';expires=0;wallExpires=0;cached=null;lastCipher='';clearTimeout(timer);
+    generation++;key=null;username='';salt='';expires=0;wallExpires=0;cached=null;lastCipher='';historicalCache.clear();clearTimeout(timer);
     $('pages-password').value='';$('pages-dashboard').hidden=true;$('pages-gate').hidden=false;$('pages-error').textContent=message;
     window.dispatchEvent(new Event('live-locked'));
   }
@@ -37,14 +55,47 @@
     if(key && expired(wallExpires,expires)) lock('解密已超过8小时，请重新输入口令');
     return !key;
   }
-  async function fetchEnvelope(){
-    const url=new URL('snapshot.enc.json',document.baseURI);url.searchParams.set('v',String(Date.now()));
+  async function fetchEnvelope(path='snapshot.enc.json',digest=null,optional=false){
+    if(!['snapshot.enc.json','catalog.enc.json'].includes(path) && !/^history\/\d{8}\.[a-f0-9]{32}\.enc\.json$/.test(path)) throw new Error('不允许的密文路径');
+    const url=new URL(path,document.baseURI);
+    if(url.origin!==location.origin) throw new Error('密文必须来自同源地址');
+    url.searchParams.set('v',String(Date.now()));
     const response=await fetch(url,{cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(15000)});
+    if(optional && response.status===404) return null;
     if(!response.ok) throw new Error('快照暂时不可用');
     const text=await response.text();if(text.length>2000000) throw new Error('快照过大');
+    if(digest){
+      const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(text))),v=>v.toString(16).padStart(2,'0')).join('');
+      if(hash!==digest) throw new Error('密文版本不一致');
+    }
     const envelope=JSON.parse(text);validate(envelope);return envelope;
   }
-  window.liveDataSource={locked,lock,async read(){
+  async function readArtifact(path,digest=null,optional=false){
+    if(locked()) return null;
+    const version=generation,cacheKey=`${path}:${digest}`;
+    if(digest && historicalCache.has(cacheKey)) return historicalCache.get(cacheKey);
+    const envelope=await fetchEnvelope(path,digest,optional);
+    if(!envelope || version!==generation || locked()) return null;
+    if(envelope.salt!==salt) throw new Error('共享口令版本不一致');
+    const data=await decrypt(envelope,key,username);
+    if(version!==generation || locked()) return null;
+    if(digest){
+      historicalCache.set(cacheKey,data);
+      if(historicalCache.size>60) historicalCache.delete(historicalCache.keys().next().value);
+    }
+    return data;
+  }
+  window.liveDataSource={locked,lock,
+    async readCatalog(){return readArtifact('catalog.enc.json',null,true);},
+    async readHistory(day,item){
+      if(!item?.path || !validDay(day) || item.path!==`history/${day}.${item.revision}.enc.json` || !/^[a-f0-9]{32}$/.test(item.revision) || !/^[a-f0-9]{64}$/.test(item.sha256)) return null;
+      const value=await readArtifact(item.path,item.sha256);
+      if(!value) return null;
+      const r=value.record;
+      if(value.kind!=='history' || r.business_day!==day || r.revision!==item.revision) throw new Error('历史日期或修订不一致');
+      if(r.status!==item.status || JSON.stringify(r.metric_status)!==JSON.stringify(item.metric_status)) throw new Error('历史状态与目录不一致');
+      return {...r.payload,history_view:{business_day:day,revision:r.revision,status:r.status,captured_at:r.captured_at,metric_status:r.metric_status,target_origin:r.target_origin}};
+    },async read(){
     if(locked()) return null;
     const version=generation;
     const envelope=await fetchEnvelope();

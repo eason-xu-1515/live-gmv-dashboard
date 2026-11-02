@@ -30,6 +30,12 @@
   <div class="filter-title"><i></i>国家 / 区域</div><div id="country-tabs" class="country-tabs" role="group" aria-label="选择国家"></div>
   <div class="filter-status"><span id="connection" class="connection"><i></i><span>正在连接</span></span><span>目标版本 <b>经管版</b></span></div>
 </section>
+<section class="date-toolbar" aria-label="日期与达成范围">
+  <label for="history-date">美西日期 <select id="history-date" aria-label="选择业务日期"></select></label>
+  <button id="today-live" class="plain-button">今日实时</button>
+  <div class="metric-tabs" role="group" aria-label="达成范围"><button data-view="day" aria-pressed="true">单日达成</button><button data-view="period" aria-pressed="false">双十一累计达成</button></div>
+  <span id="view-description" role="status">10.31—11.18 · 先留存快照，次日回补全天</span>
+</section>
 <div id="alert" class="alert" role="status">正在读取真实成交；未取得的指标保留空值。</div>
 <section id="totals" class="totals" aria-label="关键经营指标"></section>
 <section class="panel investment-panel" aria-labelledby="investment-title">
@@ -52,13 +58,13 @@
     <div class="chart-legend"><span class="legend-total">大盘 GMV</span><span class="legend-nn">NN GMV</span><span class="legend-sd">SD GMV</span><small>USD · 美西时间</small></div>
     <div class="chart-stage"><svg id="hour-chart" viewBox="0 0 640 380" role="img" aria-label="各小时成交趋势"></svg><div id="trend-empty" class="trend-empty">小时数据待更新</div></div>
     <div id="chart-detail" class="chart-detail" aria-live="polite">悬浮小时数据点查看成交金额</div>
-    <div class="trend-note">小时成交来自支付时间聚合，不是两次刷新差额；当前小时尚未结束，未来小时不填 0。</div>
-    <details class="hour-table"><summary>查看小时数据表</summary><div class="table-scroll"><table><thead><tr><th>美西小时</th><th>大盘 GMV</th><th>NN GMV</th><th>SD GMV</th></tr></thead><tbody id="hour-details"></tbody></table></div></details>
+    <div id="trend-note" class="trend-note">小时成交来自支付时间聚合，不是两次刷新差额；当前小时尚未结束，未来小时不填 0。</div>
+    <details class="hour-table"><summary id="trend-table-title">查看小时数据表</summary><div class="table-scroll"><table><thead><tr><th id="trend-axis">美西小时</th><th>大盘 GMV</th><th>NN GMV</th><th>SD GMV</th></tr></thead><tbody id="hour-details"></tbody></table></div></details>
   </section>
 </main>
 <footer>
-  <div class="source-status"><span><i class="tiny-dot"></i>底表每 <b>15 分钟</b>更新</span><span>本机采集 <b>15 分钟 / 次</b></span><span>预计下次采集 <b id="collector-countdown">—</b></span><span>页面刷新 <b id="countdown">—</b> / 60 秒</span><span>最近查询成功 <b id="last-success">—</b></span><span>耗时 <b id="query-time">—</b></span><span>最新支付 <b id="latest-paid">—</b></span><span>SD 标签 <b id="tag-time">—</b></span></div>
-  <p>GMV 为美西业务日当天累计、美元应付口径。达成率 = 当天累计 GMV ÷ 当天全天目标（经管版）；DAC 为当天支付买家独立去重，不累计小时人数。美亚合计包含八国与一人一国（66国清单），不包含清单外地区；一人一国不是单个国家。最新支付时间不等于源表完整水位。</p>
+  <div class="source-status"><span><i class="tiny-dot"></i>来源按 <b>15 分钟</b>尝试更新</span><span>本机采集 <b>15 分钟 / 次</b></span><span>预计下次采集 <b id="collector-countdown">—</b></span><span>页面刷新 <b id="countdown">—</b> / 60 秒</span><span>最近查询成功 <b id="last-success">—</b></span><span>耗时 <b id="query-time">—</b></span><span>最新支付 <b id="latest-paid">—</b></span><span>SD 标签 <b id="tag-time">—</b></span></div>
+  <p id="scope-note">GMV 按美西业务日、美元应付口径。单日达成＝同日实际÷同日全天目标；累计达成＝同日期范围实际合计÷目标合计。最后快照不等于全天，历史回补非财务封板。DAC 单日独立去重，累计不可用；美亚合计含八国＋一人一国九桶，投资合计仅核心八国。最新支付时间不等于源表完整水位。</p>
 </footer>
 </div>
 </body></html>

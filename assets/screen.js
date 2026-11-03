@@ -16,7 +16,7 @@ const investmentKeys = [
   {key:'sd_nonbrand',label:'SD非品牌TR',note:'非品牌常规花费 ÷ 同小时SD业务GMV'},
   {key:'incremental',label:'整体增投TR',note:'全部增投资金花费 ÷ 同小时大盘业务GMV'}
 ];
-const investmentReasons = {history_scope:'历史全天来源/维表待补齐',source_failed:'投资源待更新',source_timeout:'投资源查询超时',source_invalid:'投资源校验未通过',target_missing:'目标缺项，GAP留空',target_scope:'目标资金范围待核验',denominator_missing:'对应GMV缺失或为零',hour_missing:'业务GMV小时缺失',no_safe_hour:'暂无安全截止小时',unknown_fund:'含未识别资金实际',unbudgeted:'含预算外实际',nn_hour_unknown:'NN小时截止未知',cross_source:'跨源近实时',expired:'原快照已过期，等待更新',target_invalid:'目标版本待核验',day_changed:'业务日已切换',dst_watermark:'重复小时水位待核验'};
+const investmentReasons = {components_stale:'总项已联动复算，部分分项仍待更新',history_scope:'历史全天来源/维表待补齐',source_failed:'投资源待更新',source_timeout:'投资源查询超时',source_invalid:'投资源校验未通过',target_missing:'目标缺项，GAP留空',target_scope:'目标资金范围待核验',denominator_missing:'对应GMV缺失或为零',hour_missing:'业务GMV小时缺失',no_safe_hour:'暂无安全截止小时',unknown_fund:'含未识别资金实际',unbudgeted:'含预算外实际',nn_hour_unknown:'NN小时截止未知',cross_source:'跨源近实时',expired:'原快照已过期，等待更新',target_invalid:'目标版本待核验',day_changed:'业务日已切换',dst_watermark:'重复小时水位待核验'};
 const countries = [['US','美国'],['BR','巴西'],['MX','墨西哥'],['CL','智利'],['KR','韩国'],['JP','日本'],['IL','以色列'],['GCC','GCC'],['ONE','一人一国']];
 const oneCountryIso = 'COL CHE NOR PER THA SGP PAK ARG MYS SRB REU HKG LKA AGO ISL ALB MTQ VNM CRI BGD SLV PHL GLP MUS PRI GUF TZA MOZ SYC KHM MKD PYF ZMB BOL CPV BIH PRY UGA MDV MNE NIC BRN NCL CIV DOM GTM TWN SEN MDG BWA BFA ZWE URY TUN JOR MWI RWA MMR GIN HND PNG ABW GNQ FRO NPL NAM'.split(' ');
 const iso = {USA:'US',BRA:'BR',MEX:'MX',CHL:'CL',KOR:'KR',JPN:'JP',ISR:'IL',SAU:'GCC',ARE:'GCC',QAT:'GCC',KWT:'GCC',BHR:'GCC',OMN:'GCC',...Object.fromEntries(oneCountryIso.map(code=>[code,'ONE']))};
@@ -48,7 +48,7 @@ function nnTargetSource(investment=false){
   if(payload?.period_view) return '各业务日冻结的同日目标合计；目标缺项时完整累计达成/GAP留空';
   if(selectedCountry==='ONE') return payload?.targets?.nn_independent_source || '一人一国：原独立目标配置';
   const correction=payload?.history_view?.target_correction;
-  if(investment && correction && ['IL','ALL'].includes(selectedCountry)) return `11.1 IL NN费率已显式更正：24.50% → 48.00% · 11月追踪表 AP列 · 版本 ${correction.fingerprint.slice(0,12)}；仅费率及派生值更正，原GMV目标及其他目标保持冻结`;
+  if(investment && correction && ['IL','ALL'].includes(selectedCountry)) return `11.1 IL NN费率已显式更正：24.50% → 48.00% · 11月追踪表 AP列 · 版本 ${correction.fingerprint.slice(0,12)}；${payload?.investment?.linked_totals ? 'NN预算、总TR目标及GAP已联动更正' : '仅费率及派生值更正'}，原GMV目标及其他目标保持冻结`;
   const meta=payload?.targets?.nn_target_source;
   if(!meta) return '原快照目标来源（未标记为11月追踪表）';
   const detail=meta.status==='ok' ? `读取 ${paidTime(meta.fetched_at)}（美西） · 版本 ${meta.fingerprint.slice(0,12)}` : '目标未齐，相关达成/GAP留空';
@@ -93,14 +93,14 @@ function renderInvestment(){
     card.querySelector('.investment-time').textContent=payload?.period_view ? '按日期、国家及相同资金范围合计；不平均每日费率' : v?.source_success_at ? `${v.status==='stale' ? '原来源成功' : '来源成功'} ${paidTime(v.source_success_at)}（美西） · ${Number.isInteger(v.cutoff_hour) ? '同小时截取至 '+String(v.cutoff_hour).padStart(2,'0')+':00' : '小时截止未知'}` : '来源时间待更新';
     const reasons=(v?.reason_codes || []).map(reason=>investmentReasons[reason]).filter(Boolean);
     if(expired) reasons.push('原快照已过期，等待更新');
-    if(v?.status==='stale' && !expired) reasons.unshift('待更新：完整保留原费率、分母与目标');
+    if(v?.status==='stale' && !expired) reasons.unshift(payload?.investment?.linked_totals ? (key==='total' ? '待更新：总花费、预算及GAP已按分项联动复算' : '待更新：保留来源实际与分母，目标按绑定版本计算') : '待更新：完整保留原费率、分母与目标');
     if(!items) reasons.push('投资数据待接入');
     if(selectedCountry==='ALL' && !numeric(v?.target_rate_pct) && payload?.investment){
       const missing=investmentCountries().filter(([c])=>!numeric(payload.investment.countries?.[c]?.[key]?.target_rate_pct)).map(([,name])=>name);
       if(missing.length) reasons.push('合计目标缺项：'+missing.join('、'));
     }
     card.querySelector('.investment-status').textContent=[...new Set(reasons)].join(' · ') || '同日快照';
-    card.querySelector('.investment-definition').textContent=payload?.period_view ? '累计花费 ÷ 累计对应GMV；目标＝累计预算 ÷ 累计同日目标GMV；非财务封板' : key==='nn' ? `${note}；目标：${nnTargetSource(true)}` : note;
+    card.querySelector('.investment-definition').textContent=payload?.period_view ? '累计花费 ÷ 累计对应GMV；目标＝累计预算 ÷ 累计同日目标GMV；非财务封板' : key==='nn' ? `${note}；目标：${nnTargetSource(true)}` : key==='total' && payload?.investment?.linked_totals ? `${note}；总预算 $${formatted(v?.budget)} / 大盘目标 $${formatted(v?.target_gmv)}；NN目标：${nnTargetSource(true)}` : note;
   });
   const sources=payload?.investment?.sources;
   text('investment-sources',payload?.period_view ? '分日冻结的来源与目标；按同国家、同资金范围累计，缺日或缺目标不显示完整累计。' : sources ? ['nn','marketing'].map(key=>{

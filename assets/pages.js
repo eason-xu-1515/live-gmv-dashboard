@@ -52,6 +52,8 @@
   if(typeof module!=='undefined' && module.exports) module.exports={derive,decrypt,validate,expired};
   if(typeof window==='undefined' || !document.getElementById('pages-gate')) return;
   const $=id=>document.getElementById(id), TTL=8*3600*1000;
+  const bucRequired=document.querySelector('meta[name="aone-buc"]')?.content==='required';
+  const bucMessage='集团 BUC 登录已失效，请刷新页面重新登录';
   let key=null, username='', salt='', expires=0, wallExpires=0, timer=null, generation=0, cached=null, lastCipher='';
   const historicalCache=new Map();
   function lock(message=''){
@@ -63,14 +65,24 @@
     if(key && expired(wallExpires,expires)) lock('解密已超过8小时，请重新输入口令');
     return !key;
   }
+  async function verifyBuc(){
+    if(!bucRequired) return;
+    try{
+      const response=await fetch('/_pages/buc-user',{cache:'no-store',credentials:'same-origin',redirect:'error',signal:AbortSignal.timeout(15000)});
+      if(!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error();
+      const user=await response.json();
+      if(!user || typeof user.empId!=='string' || !user.empId) throw new Error();
+    }catch(error){lock(bucMessage);throw new Error(bucMessage);}
+  }
   async function fetchEnvelope(path='snapshot.enc.json',digest=null,optional=false){
     if(!['snapshot.enc.json','catalog.enc.json'].includes(path) && !/^history\/\d{8}\.[a-f0-9]{32}\.enc\.json$/.test(path)) throw new Error('不允许的密文路径');
     const url=new URL(path,document.baseURI);
     if(url.origin!==location.origin) throw new Error('密文必须来自同源地址');
     url.searchParams.set('v',String(Date.now()));
-    const response=await fetch(url,{cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(15000)});
+    await verifyBuc();
+    const response=await fetch(url,{cache:'no-store',credentials:'same-origin',redirect:'error',signal:AbortSignal.timeout(15000)});
     if(optional && response.status===404) return null;
-    if(!response.ok) throw new Error('快照暂时不可用');
+    if(!response.ok || response.headers.get('content-type')?.includes('text/html')) throw new Error('快照暂时不可用');
     const text=await response.text();if(text.length>2000000) throw new Error('快照过大');
     if(digest){
       const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(text))),v=>v.toString(16).padStart(2,'0')).join('');
@@ -130,7 +142,7 @@
       $('pages-error').textContent='';$('pages-gate').hidden=true;$('pages-dashboard').hidden=false;
       window.dispatchEvent(new Event('live-unlocked'));
     }catch(error){
-      if(version===generation) $('pages-error').textContent='账号或共享口令不正确，或快照暂时不可用；不会发送你的口令。';
+      if(version===generation) $('pages-error').textContent=error.message===bucMessage ? bucMessage : '账号或共享口令不正确，或快照暂时不可用；不会发送你的口令。';
     }finally{password='';button.disabled=false;$('pages-password').value='';}
   });
   document.addEventListener('visibilitychange',()=>{if(!document.hidden) locked();});
